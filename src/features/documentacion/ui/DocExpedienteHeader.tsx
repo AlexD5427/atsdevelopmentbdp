@@ -1,33 +1,40 @@
 /**
  * Cabecera del expediente.
  *
- * ── Qué problema resuelve ───────────────────────────────────────────────────
+ * ── Qué problema resuelve ─────────────────────────────────────────────
  * La cabecera anterior era una rejilla de siete datos con el mismo peso: agencia,
  * gerencia, ingreso, antigüedad, responsable, próxima fecha crítica y última
  * actualización, todos en `text-xs`. Ninguno destacaba, y el dato que de verdad
  * decide qué hacer —qué falta para cerrar este expediente— no estaba: había que
  * deducirlo de seis contadores en la esquina.
  *
+ * Y faltaba el CARGO. Se abría el expediente de una persona y no había forma de
+ * saber para qué puesto entraba, que es la primera pregunta de cualquiera que
+ * revisa una incorporación.
+ *
  * Aquí la cabecera tiene tres franjas con una jerarquía deliberada:
  *
- * 1. **Identidad**: nombre completo (sin recortar), identificador, rama y estado.
- * 2. **Situación**: avance, qué falta, qué plazo hay y qué desbloquea el
- *    expediente. Es la franja que se lee de un vistazo.
+ * 1. **Identidad**: la categoría con su color y su icono, el estado y el avance.
+ * 2. **Situación**: qué falta, qué plazo hay, qué desbloquea el expediente, y los
+ *    datos de la persona empezando por Cargo, Agencia e Ingreso —en ese orden,
+ *    que es el de las preguntas que se hacen de verdad.
  * 3. **Trazabilidad y acciones**: quién lo tocó por última vez y cuándo, si hay
  *    cambios sin guardar, y los botones que el rol permite.
  *
- * ── Qué NO hace ─────────────────────────────────────────────────────────────
+ * ── Qué NO hace ───────────────────────────────────────────────────────
  * No calcula estados de negocio: el avance, los totales y el resumen textual
  * vienen del backend. Lo único que se decide aquí es cómo se ordenan y qué frase
  * los acompaña.
  */
 
 import type { ReactNode } from "react";
-import { AlertTriangle, ArrowRight, CalendarClock, User } from "lucide-react";
+import { AlertTriangle, ArrowRight, Briefcase, Building2, CalendarClock, CalendarDays, User } from "lucide-react";
 import type { ExpedienteOperativo } from "../api/acciones";
 import { fechaCorta, fechaHora, textoAntiguedad, textoPlazo } from "../domain/progreso";
+import { categoria as buscarCategoria } from "../domain/categorias";
 import { ETIQUETA_EXPEDIENTE, INTENCION_EXPEDIENTE } from "../domain/vocabulario";
 import { BarraAvance, ChipEstado, TONO } from "./piezas";
+import { IconoPorCodigo } from "./IconosCategoria";
 import { IndicadorGuardado, hace, type EstadoEscritura } from "./DocSyncIndicator";
 
 export function DocExpedienteHeader({
@@ -51,6 +58,17 @@ export function DocExpedienteHeader({
     ? datos.requisitos.find((r) => r.expedienteDocumentoId === datos.siguientePendiente?.expedienteDocumentoId)
     : null;
 
+  /**
+   * Identidad de la categoría.
+   *
+   * El color y el icono salen de la declaración del dominio, no de esta pantalla:
+   * así el expediente, el formulario y el informe mensual pintan la misma categoría
+   * igual. Si el expediente trae una rama que la declaración no conoce, se cae al
+   * texto que manda el backend en lugar de quedarse en blanco.
+   */
+  const categoria = buscarCategoria(cabecera.tipoFuncionario);
+  const colorCategoria = categoria?.color ?? "var(--doc-accent)";
+
   const alertas: { intencion: "peligro" | "aviso"; texto: string }[] = [];
   if (t.prorrogasVencidas > 0) {
     alertas.push({ intencion: "peligro", texto: `${t.prorrogasVencidas} prórroga(s) vencida(s)` });
@@ -61,29 +79,42 @@ export function DocExpedienteHeader({
 
   return (
     <section className="doc-raised doc-print-keep overflow-hidden">
-      {/* ── 1 · Identidad ───────────────────────────────────────────── */}
+      {/* ── 1 · Identidad ──────────────────────────────────────── */}
       <div className="border-b border-[color:var(--doc-border)] p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
-            {/*
-              Aquí no se repite el nombre: la cabecera del panel lateral lo lleva y
-              queda fija mientras se baja por los requisitos, así que duplicarlo
-              solo gasta la primera línea de la pantalla. Esta franja empieza por lo
-              que el nombre no dice: en qué estado está y bajo qué rama.
-            */}
-            <p className="doc-eyebrow">Situación del expediente</p>
-            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-              <ChipEstado
-                estado={cabecera.estado}
-                etiqueta={ETIQUETA_EXPEDIENTE[cabecera.estado] ?? cabecera.estado}
-                intencion={INTENCION_EXPEDIENTE[cabecera.estado] ?? "neutral"}
-                prorroga={cabecera.estado === "CON_PRORROGA"}
-                titulo="Estado del expediente, calculado por el backend a partir de sus requisitos"
-              />
-              <span className="text-[11px] text-[color:var(--doc-text-muted)]">{cabecera.tipoFuncionarioEtiqueta}</span>
-              {cabecera.tipoGarantia !== "NINGUNA" && (
-                <span className="text-[11px] text-[color:var(--doc-text-muted)]">· {cabecera.tipoGarantiaEtiqueta}</span>
-              )}
+          <div className="flex min-w-0 items-start gap-3">
+            {/* El icono de la categoría es reconocible sin leer, que es exactamente
+                para lo que sirve un icono. La franja no repite el nombre: la
+                cabecera del panel lateral lo lleva y queda fija al desplazarse. */}
+            <span
+              className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-xl border"
+              style={{
+                borderColor: `color-mix(in srgb, ${colorCategoria} 45%, var(--doc-border))`,
+                background: `color-mix(in srgb, ${colorCategoria} 12%, transparent)`,
+                color: colorCategoria,
+              }}
+              title={categoria?.etiqueta ?? cabecera.tipoFuncionarioEtiqueta}
+            >
+              <IconoPorCodigo codigo={cabecera.tipoFuncionario} className="h-5 w-5" />
+            </span>
+
+            <div className="min-w-0">
+              <p className="doc-eyebrow">Situación del expediente</p>
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                <ChipEstado
+                  estado={cabecera.estado}
+                  etiqueta={ETIQUETA_EXPEDIENTE[cabecera.estado] ?? cabecera.estado}
+                  intencion={INTENCION_EXPEDIENTE[cabecera.estado] ?? "neutral"}
+                  prorroga={cabecera.estado === "CON_PRORROGA"}
+                  titulo="Estado del expediente, calculado por el backend a partir de sus requisitos"
+                />
+                <span className="text-[11px] font-semibold" style={{ color: colorCategoria }}>
+                  {categoria?.etiqueta ?? cabecera.tipoFuncionarioEtiqueta}
+                </span>
+                {cabecera.tipoGarantia !== "NINGUNA" && (
+                  <span className="text-[11px] text-[color:var(--doc-text-muted)]">· {cabecera.tipoGarantiaEtiqueta}</span>
+                )}
+              </div>
             </div>
           </div>
 
@@ -101,7 +132,7 @@ export function DocExpedienteHeader({
         </div>
       </div>
 
-      {/* ── 2 · Situación ───────────────────────────────────────────── */}
+      {/* ── 2 · Situación ──────────────────────────────────────── */}
       <div className="grid gap-3 border-b border-[color:var(--doc-border)] p-4 sm:grid-cols-2">
         <div className="min-w-0 space-y-2">
           <p className="doc-eyebrow">Qué desbloquea este expediente</p>
@@ -152,10 +183,32 @@ export function DocExpedienteHeader({
           )}
         </div>
 
+        {/*
+          El orden de esta rejilla es el de las preguntas que se hacen al abrir un
+          expediente: para qué puesto entra, dónde va a trabajar y desde cuándo. Lo
+          demás se consulta después.
+        */}
         <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-          <Dato etiqueta="Agencia" valor={cabecera.agencia || "No registrada"} />
+          <Dato
+            etiqueta="Cargo"
+            valor={cabecera.cargo || "No registrado"}
+            icono={<Briefcase className="h-3 w-3" aria-hidden />}
+            destacado
+          />
+          <Dato
+            etiqueta="Agencia"
+            valor={cabecera.agencia || "No registrada"}
+            icono={<Building2 className="h-3 w-3" aria-hidden />}
+            destacado
+          />
+          <Dato
+            etiqueta="Fecha de ingreso"
+            valor={fechaCorta(cabecera.fechaIngreso)}
+            pista={textoAntiguedad(cabecera.diasDesdeIngreso)}
+            icono={<CalendarDays className="h-3 w-3" aria-hidden />}
+            destacado
+          />
           <Dato etiqueta="Gerencia" valor={cabecera.gerencia || "No registrada"} />
-          <Dato etiqueta="Ingreso" valor={fechaCorta(cabecera.fechaIngreso)} pista={textoAntiguedad(cabecera.diasDesdeIngreso)} />
           <Dato
             etiqueta="Próximo plazo"
             valor={cabecera.proximaFechaCritica ? fechaCorta(cabecera.proximaFechaCritica) : "Sin plazo"}
@@ -168,11 +221,10 @@ export function DocExpedienteHeader({
             valor={cabecera.responsableId || "Sin asignar"}
             icono={<User className="h-3 w-3" aria-hidden />}
           />
-          <Dato etiqueta="Año del libro" valor={String(cabecera.anio || "—")} />
         </dl>
       </div>
 
-      {/* ── 3 · Trazabilidad y acciones ────────────────────────────── */}
+      {/* ── 3 · Trazabilidad y acciones ───────────────────────────── */}
       <div className="space-y-2.5 p-4">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-[color:var(--doc-text-faint)]">
           <span>
@@ -181,6 +233,9 @@ export function DocExpedienteHeader({
           </span>
           <span className="doc-metric" title="Versión del registro: el backend la usa para detectar escrituras simultáneas">
             versión {cabecera.version}
+          </span>
+          <span className="doc-metric" title="Pestaña anual del libro en la que se refleja este expediente">
+            libro {cabecera.anio || "—"}
           </span>
           {/* El detalle dice «por escribir» y no «sin guardar»: el pie del panel
               ya usa esa frase con el botón de guardar, y repetir el mismo texto en
@@ -216,12 +271,15 @@ function Dato({
   pista,
   intencion,
   icono,
+  destacado,
 }: {
   etiqueta: string;
   valor: string;
   pista?: string;
   intencion?: "aviso" | "peligro";
   icono?: ReactNode;
+  /** Los tres datos que se buscan al abrir el expediente van un punto más fuertes. */
+  destacado?: boolean;
 }) {
   return (
     <div className="min-w-0">
@@ -229,7 +287,11 @@ function Dato({
         {icono}
         {etiqueta}
       </dt>
-      <dd className="doc-prose font-medium" style={{ color: intencion ? TONO[intencion].texto : "var(--doc-text)" }} title={pista ?? valor}>
+      <dd
+        className={destacado ? "doc-prose text-[13px] font-semibold" : "doc-prose font-medium"}
+        style={{ color: intencion ? TONO[intencion].texto : "var(--doc-text)" }}
+        title={pista ?? valor}
+      >
         {valor}
         {pista && <span className="block text-[11px] font-normal text-[color:var(--doc-text-faint)]">{pista}</span>}
       </dd>

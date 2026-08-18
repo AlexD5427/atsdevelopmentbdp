@@ -4,20 +4,31 @@
  * Consola de operación del proceso documental de incorporación, sobre el libro de
  * Google Sheets del área.
  *
- * ── Cómo está montada ───────────────────────────────────────────────────────
+ * ── Cómo está montada ────────────────────────────────────────────────
  * Un armazón (`DocShell`) con navegación agrupada y trece secciones. El armazón se
  * ocupa de cuatro cosas y nada más: resolver la conexión y los permisos al
  * entrar, decidir qué secciones puede ver este rol, ofrecer la acción principal
  * del módulo, y mantener abierto el panel del expediente por encima de la sección
  * que sea. Cada sección se ocupa de sus datos.
  *
- * ── Qué pasa si el backend no está ──────────────────────────────────────────
+ * ── Dónde viven el alta y el informe ───────────────────────────────────
+ * Aquí, no dentro de las secciones. `NuevoExpediente` sustituye al alta que vivía
+ * en `SeccionExpedientes`, que sigue intacta y simplemente ya no la abre
+ * (`altaAbierta={false}`): si el formulario nuevo hubiera que revertirlo, se
+ * revierte cambiando dos props en lugar de rehacer una sección de 58 kB.
+ *
+ * El informe mensual entra como segunda acción de la cabecera y no como sección
+ * del menú. Ampliar `SeccionId` y `SECCIONES` habría tocado `vocabulario.ts`, que
+ * es el archivo que una prueba compara campo a campo contra el vocabulario del
+ * backend; una pantalla nueva no justifica remover ese contrato.
+ *
+ * ── Qué pasa si el backend no está ────────────────────────────────────
  * El módulo no finge. Si no hay backend configurado, o está sin instalar, o no
  * responde, se dice con claridad y se ofrece qué hacer: configurar la conexión,
  * instalar el modelo o abrir la vista local, que trabaja contra el almacén de este
  * equipo y es lo que había antes. Ninguna pantalla muestra datos inventados.
  *
- * ── Identidad visual ────────────────────────────────────────────────────────
+ * ── Identidad visual ────────────────────────────────────────────────
  * Liquid Glass para el armazón y el panel lateral; dentro, superficies planas con
  * los tokens del módulo (`--doc-*`), porque el contenido denso se lee mejor sobre
  * una superficie que sobre un cristal. Las animaciones se apagan enteras con
@@ -28,7 +39,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { CircleSlash, Database, FolderPlus, RefreshCw, Wrench } from "lucide-react";
+import { CalendarRange, CircleSlash, Database, FolderPlus, RefreshCw, Wrench } from "lucide-react";
 import { docApi } from "../api/acciones";
 import { seccionesPermitidas, type SeccionId } from "../domain/vocabulario";
 import { comprobarConexion, irASeccion, refrescarNotificaciones, useConsola } from "../state/consola";
@@ -41,6 +52,8 @@ import { DocModoDegradado } from "./DocStates";
 import { SeccionPanel } from "./SeccionPanel";
 import { SeccionExpedientes } from "./SeccionExpedientes";
 import { ExpedienteLateral } from "./ExpedienteLateral";
+import { NuevoExpediente } from "./NuevoExpediente";
+import { InformeMensualPanel } from "./InformeMensualPanel";
 import { SeccionAprobaciones, SeccionProrrogas, SeccionRevision, SeccionSolicitudes, SeccionTareas } from "./SeccionTrabajo";
 import { SeccionAuditoria, SeccionExportaciones, SeccionNotificaciones, SeccionReportes } from "./SeccionReportes";
 import { SeccionConfiguracion } from "./SeccionConfiguracion";
@@ -53,6 +66,7 @@ export function DocumentacionConsola() {
   const reducido = useMovimientoReducido();
   const [expedienteAbierto, setExpedienteAbierto] = useState<string | null>(null);
   const [altaAbierta, setAltaAbierta] = useState(false);
+  const [informeAbierto, setInformeAbierto] = useState(false);
   const [refresco, setRefresco] = useState(0);
 
   /**
@@ -139,17 +153,23 @@ export function DocumentacionConsola() {
         onReconectar={() => void comprobarConexion({ actor: current?.nombre ?? "", rol: current?.role ?? "" })}
         avisoGlobal={avisoGlobal}
         accionPrincipal={
-          conectado && consola.capacidades.editar ? (
-            <Boton
-              variante="primario"
-              onClick={() => {
-                irASeccion("expedientes");
-                setAltaAbierta(true);
-              }}
-              titulo="Abrir un expediente documental nuevo"
-            >
-              <FolderPlus className="h-3.5 w-3.5" aria-hidden /> Nuevo expediente
-            </Boton>
+          conectado ? (
+            <>
+              {consola.capacidades.exportar && (
+                <Boton
+                  variante="suave"
+                  onClick={() => setInformeAbierto(true)}
+                  titulo="Informe mensual de avance documental, por categoría y por persona"
+                >
+                  <CalendarRange className="h-3.5 w-3.5" aria-hidden /> Informe mensual
+                </Boton>
+              )}
+              {consola.capacidades.editar && (
+                <Boton variante="primario" onClick={() => setAltaAbierta(true)} titulo="Abrir un expediente documental nuevo">
+                  <FolderPlus className="h-3.5 w-3.5" aria-hidden /> Nuevo expediente
+                </Boton>
+              )}
+            </>
           ) : undefined
         }
       >
@@ -160,12 +180,12 @@ export function DocumentacionConsola() {
             <motion.div key={seccionActiva} {...propsSeccion(reducido)}>
               {seccionActiva === "panel" && <SeccionPanel onAbrirExpediente={abrirExpediente} />}
               {seccionActiva === "expedientes" && (
-                <SeccionExpedientes
-                  onAbrir={abrirExpediente}
-                  avisar={avisar}
-                  altaAbierta={altaAbierta}
-                  onCerrarAlta={() => setAltaAbierta(false)}
-                />
+                /*
+                  `altaAbierta={false}` de forma permanente: el alta de esta sección
+                  queda sustituida por `NuevoExpediente`, que se monta abajo. La
+                  sección no se toca para que revertir sea cambiar esta línea.
+                */
+                <SeccionExpedientes onAbrir={abrirExpediente} avisar={avisar} altaAbierta={false} onCerrarAlta={() => undefined} />
               )}
               {seccionActiva === "solicitudes" && <SeccionSolicitudes onAbrirExpediente={abrirExpediente} avisar={avisar} />}
               {seccionActiva === "revision" && <SeccionRevision onAbrirExpediente={abrirExpediente} avisar={avisar} />}
@@ -182,6 +202,21 @@ export function DocumentacionConsola() {
           </AnimatePresence>
         )}
       </DocShell>
+
+      <NuevoExpediente
+        abierto={altaAbierta}
+        onCerrar={() => setAltaAbierta(false)}
+        onCreado={(expedienteId) => {
+          setAltaAbierta(false);
+          setRefresco((n) => n + 1);
+          // «Guardar y abrir expediente»: el expediente recién creado se abre para
+          // seguir trabajándolo, que es lo que se hace siempre a continuación.
+          abrirExpediente(expedienteId);
+        }}
+        avisar={avisar}
+      />
+
+      <InformeMensualPanel abierto={informeAbierto} onCerrar={() => setInformeAbierto(false)} avisar={avisar} />
 
       <ExpedienteLateral
         expedienteId={expedienteAbierto}
@@ -233,11 +268,11 @@ function SinConexion({
             </h3>
             <p className="doc-prose mt-1 max-w-prose text-xs leading-relaxed text-[color:var(--doc-text-muted)]">
               {conexion === "sin_configurar" &&
-                "La consola trabaja contra el libro de Google Sheets a través de una aplicación web de Apps Script. Pega su URL en los ajustes locales del módulo (Configuración › Ajustes locales › Conexión)."}
+                "La consola trabaja contra el libro de Google Sheets a través de una aplicación web de Apps Script. Ojo: es el proyecto de Apps Script DE DOCUMENTACIÓN, que no es el mismo que usa el resto de la aplicación. Pega su URL /exec en Configuración › Ajustes locales › Conexión."}
               {conexion === "sin_instalar" &&
                 "El backend responde, pero le faltan las hojas del modelo normalizado. Se pueden crear desde aquí: la operación es idempotente y no borra nada de lo que ya haya en el libro."}
               {(conexion === "sin_conexion" || conexion === "error") &&
-                "Puede ser la red, la implementación sin publicar o el acceso de la aplicación web. Mientras tanto puedes trabajar en la vista local: lo que registres se queda en este equipo y se sincroniza cuando vuelva la conexión."}
+                "Puede ser la red, la implementación sin publicar, el acceso de la aplicación web o una URL que apunta a otro proyecto. Mientras tanto puedes trabajar en la vista local: lo que registres se queda en este equipo y se sincroniza cuando vuelva la conexión."}
             </p>
             {ultimoError && (
               <div className="mt-3">
