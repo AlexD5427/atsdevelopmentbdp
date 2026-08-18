@@ -21,6 +21,51 @@ import type { ModuleId } from "./types";
 export const SCRIPT_URL =
   "https://script.google.com/macros/s/AKfycby5iqFsfvuL6movHAfZ46CZZuND22M1J-R-D3BLv2mx-a8lmRa_AePbmV59jPRTA-hczQ/exec";
 
+/**
+ * Endpoint del módulo de Documentación — OTRO proyecto de Apps Script.
+ *
+ * ── Por qué no es `SCRIPT_URL` ───────────────────────────────────────────
+ * Documentación tiene su propio libro (las 19 hojas normalizadas y las pestañas
+ * `CONTROL INGRESOS <año>`) y su propio despliegue, el de
+ * `apps-script/documentacion/`. Son dos backends distintos que hablan idiomas
+ * distintos: el del dashboard responde `{ candidatos, competencias,
+ * arquetipos_disc }` a un GET; el de Documentación responde el sobre
+ * `{ ok, accion, datos, meta }` a acciones `documentacion.*`.
+ *
+ * El cliente del módulo usaba `SCRIPT_URL` como valor por defecto, y como la URL
+ * del dashboard también empieza por `https://script.google.com/`, la comprobación
+ * de «hay backend configurado» la daba por buena. El módulo se declaraba
+ * conectado y mandaba sus acciones al proyecto equivocado, que contestaba 200 con
+ * un JSON válido y sin campo `ok`. De ahí el «el backend rechazó la operación»
+ * sin más explicación.
+ *
+ * ── Por qué vacía por defecto ──────────────────────────────────────────
+ * Porque la URL depende de CADA despliegue: al publicar una versión nueva de la
+ * aplicación web, Google emite otro identificador. Codificarla aquí obligaría a
+ * un commit y a un despliegue de Vercel cada vez que se republica el Apps
+ * Script. Se resuelve en este orden:
+ *
+ *   1. `VITE_DOC_SCRIPT_URL` del entorno (Vercel → Environment Variables);
+ *   2. lo que se haya guardado en el navegador desde Configuración › Conexión;
+ *   3. vacía → el módulo dice «sin configurar» y explica qué pegar y dónde.
+ *
+ * Vacía es la respuesta honesta. Lo que no puede volver a pasar es que apunte en
+ * silencio a otro backend.
+ */
+function urlDocumentacionDelEntorno(): string {
+  try {
+    const entorno = import.meta.env as Record<string, string | undefined> | undefined;
+    return String(entorno?.VITE_DOC_SCRIPT_URL ?? "").trim();
+  } catch {
+    return "";
+  }
+}
+
+export const SCRIPT_URL_DOCUMENTACION = urlDocumentacionDelEntorno();
+
+/** Clave con la que se recuerda la URL de Documentación en este navegador. */
+export const CLAVE_URL_DOCUMENTACION = "bdp-documentacion-url";
+
 export interface DockItem {
   id: ModuleId;
   label: string;
