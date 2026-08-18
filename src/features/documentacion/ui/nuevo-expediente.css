@@ -1,0 +1,899 @@
+/**
+ * Expediente nuevo — capa visual y de movimiento.
+ *
+ * Todo acotado a `.ne-*` para no filtrar nada al resto de la aplicación, y todo
+ * construido sobre los tokens `--doc-*` que el módulo ya define por tema. Así el
+ * tema claro, el alto contraste, la transparencia reducida y la impresión siguen
+ * funcionando sin una regla nueva por cada uno.
+ */
+
+/* ------------------------------------------------------------------ */
+/* Curvas y duraciones                                                 */
+/* ------------------------------------------------------------------ */
+
+.ne-form {
+  /* Espejo exacto de DocMotion.ts. Si cambia una, cambia la otra. */
+  --ne-rapida: 120ms;
+  --ne-normal: 240ms;
+  --ne-lenta: 420ms;
+  --ne-salida: cubic-bezier(0.16, 1, 0.3, 1);
+  --ne-quint: cubic-bezier(0.22, 1, 0.36, 1);
+  --ne-muelle: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* ------------------------------------------------------------------ */
+/* Campos                                                              */
+/* ------------------------------------------------------------------ */
+
+.doc-campo {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  min-width: 0;
+}
+
+.doc-input {
+  width: 100%;
+  min-width: 0;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--doc-border);
+  border-radius: 0.6rem;
+  background: var(--doc-surface-2);
+  color: var(--doc-text);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  /* El color y la sombra del foco sí se animan: son 1 nodo y 120 ms. */
+  transition:
+    border-color var(--ne-rapida, 120ms) ease,
+    box-shadow var(--ne-rapida, 120ms) ease,
+    background-color var(--ne-rapida, 120ms) ease;
+}
+
+.doc-input:hover:not(:disabled) {
+  border-color: var(--doc-border-fuerte, var(--doc-border));
+}
+
+.doc-input:focus-visible {
+  outline: none;
+  border-color: var(--doc-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--doc-accent) 26%, transparent);
+}
+
+.doc-input[aria-invalid="true"] {
+  border-color: var(--doc-danger);
+}
+
+.ne-textarea {
+  resize: vertical;
+  min-height: 2.75rem;
+}
+
+.ne-ayuda {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--doc-text-faint);
+}
+
+.ne-error {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--doc-danger-fg, var(--doc-danger));
+}
+
+/* ------------------------------------------------------------------ */
+/* Armazón del formulario                                              */
+/* ------------------------------------------------------------------ */
+
+.ne-form {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 0.75rem;
+}
+
+.ne-pasos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  align-items: center;
+}
+
+.ne-paso {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.32rem 0.7rem;
+  border: 1px solid var(--doc-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--doc-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition:
+    color var(--ne-rapida) ease,
+    border-color var(--ne-rapida) ease,
+    background-color var(--ne-rapida) ease,
+    transform var(--ne-rapida) var(--ne-quint);
+}
+
+.ne-paso:hover:not(:disabled) {
+  color: var(--doc-text);
+  transform: translateY(-1px);
+}
+
+.ne-paso:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ne-paso[data-activo="si"] {
+  color: var(--doc-text);
+  border-color: var(--doc-accent);
+  background: color-mix(in srgb, var(--doc-accent) 14%, transparent);
+}
+
+.ne-paso[data-completo="si"] .ne-paso-numero {
+  background: var(--doc-success);
+  color: #fff;
+  border-color: transparent;
+}
+
+.ne-paso-numero {
+  display: inline-grid;
+  place-items: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  border: 1px solid var(--doc-border);
+  border-radius: 999px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ne-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  min-height: 0;
+}
+
+.ne-rejilla {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 640px) {
+  .ne-rejilla {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ne-rejilla-ancho {
+    grid-column: 1 / -1;
+  }
+}
+
+.ne-seccion-titulo {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.ne-seccion-titulo h3 {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 650;
+  color: var(--doc-text);
+}
+
+.ne-caracteristicas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ne-caracteristicas li {
+  padding: 0.2rem 0.55rem;
+  border: 1px dashed var(--doc-border);
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--doc-text-muted);
+}
+
+/* ------------------------------------------------------------------ */
+/* Tarjetas de categoría                                               */
+/* ------------------------------------------------------------------ */
+
+.ne-categorias {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 560px) {
+  .ne-categorias {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1024px) {
+  .ne-categorias {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.ne-categoria {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.95rem;
+  border: 1px solid var(--doc-border);
+  border-radius: 0.9rem;
+  background: var(--doc-surface-2);
+  text-align: left;
+  overflow: hidden;
+  /* `transform` y `opacity` solamente: el resto es un degradado que ya está
+     pintado y solo cambia de opacidad. */
+  transition:
+    transform var(--ne-normal) var(--ne-salida),
+    border-color var(--ne-normal) ease,
+    box-shadow var(--ne-normal) ease;
+}
+
+/* El brillo que sigue al color de la categoría. Vive en un pseudo-elemento para
+   no repintar la tarjeta al aparecer. */
+.ne-categoria::before {
+  content: "";
+  position: absolute;
+  inset: -40% 40% 55% -40%;
+  background: radial-gradient(circle at 30% 30%, var(--ne-color, var(--doc-accent)), transparent 70%);
+  opacity: 0;
+  transition: opacity var(--ne-lenta) var(--ne-salida);
+  pointer-events: none;
+}
+
+.ne-categoria:hover:not(:disabled) {
+  transform: translateY(-3px);
+  border-color: var(--ne-color, var(--doc-accent));
+  box-shadow: 0 14px 34px -18px color-mix(in srgb, var(--ne-color, var(--doc-accent)) 60%, transparent);
+}
+
+.ne-categoria:hover:not(:disabled)::before {
+  opacity: 0.16;
+}
+
+.ne-categoria[data-elegida="si"] {
+  border-color: var(--ne-color, var(--doc-accent));
+  box-shadow:
+    0 0 0 1px var(--ne-color, var(--doc-accent)) inset,
+    0 18px 40px -22px color-mix(in srgb, var(--ne-color, var(--doc-accent)) 70%, transparent);
+}
+
+.ne-categoria[data-elegida="si"]::before {
+  opacity: 0.22;
+}
+
+.ne-categoria:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.ne-categoria-icono {
+  display: grid;
+  place-items: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.7rem;
+  border: 1px solid color-mix(in srgb, var(--ne-color, var(--doc-accent)) 45%, var(--doc-border));
+  background: color-mix(in srgb, var(--ne-color, var(--doc-accent)) 12%, transparent);
+  color: var(--ne-color, var(--doc-accent));
+}
+
+.ne-categoria-nombre {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 650;
+  color: var(--doc-text);
+  text-wrap: balance;
+}
+
+.ne-categoria-descripcion {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--doc-text-muted);
+}
+
+.ne-categoria-nota {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  align-self: flex-start;
+  padding: 0.18rem 0.5rem;
+  border-radius: 999px;
+  background: var(--doc-warning-bg);
+  color: var(--doc-warning-fg);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+/* Tarjeta de tipo de garantía: misma familia, más baja. */
+.ne-garantias {
+  display: grid;
+  gap: 0.65rem;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 720px) {
+  .ne-garantias {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Chips de estado                                                     */
+/* ------------------------------------------------------------------ */
+
+.ne-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  flex-shrink: 0;
+}
+
+.ne-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.28rem 0.6rem;
+  border: 1px solid var(--doc-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--doc-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition:
+    color var(--ne-rapida) ease,
+    border-color var(--ne-rapida) ease,
+    background-color var(--ne-rapida) ease,
+    transform var(--ne-rapida) var(--ne-muelle);
+}
+
+.ne-chip:hover:not([data-activo="si"]) {
+  color: var(--doc-text);
+  border-color: var(--doc-border-fuerte, var(--doc-border));
+}
+
+.ne-chip[data-activo="si"] {
+  /* El muelle solo actua en el chip que se acaba de elegir: es el unico sitio
+     donde un rebote corto dice «esto ha quedado marcado» sin ser un adorno. */
+  animation: ne-chip-marcado var(--ne-normal) var(--ne-muelle);
+}
+
+@keyframes ne-chip-marcado {
+  0% {
+    transform: scale(0.94);
+  }
+  60% {
+    transform: scale(1.03);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.ne-chip-punto {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.ne-chips-compacto .ne-chip {
+  padding: 0.2rem 0.45rem;
+  font-size: 10px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Fila de requisito                                                   */
+/* ------------------------------------------------------------------ */
+
+.ne-requisitos {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ne-requisito {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.7rem 0.8rem 0.7rem 1rem;
+  border: 1px solid var(--doc-border);
+  border-radius: 0.75rem;
+  background: var(--doc-surface-2);
+  transition: border-color var(--ne-normal) ease, background-color var(--ne-normal) ease;
+}
+
+/* La cinta de estado a la izquierda. Es lo que permite recorrer veintisiete
+   requisitos con la vista sin leer un solo chip. */
+.ne-requisito::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.55rem;
+  bottom: 0.55rem;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--doc-border);
+  transition: background-color var(--ne-normal) ease;
+}
+
+.ne-requisito[data-estado="ENTREGADO"]::before {
+  background: var(--doc-success);
+}
+.ne-requisito[data-estado="PENDIENTE"]::before {
+  background: var(--doc-warning);
+}
+.ne-requisito[data-estado="NO_ENTREGADO"]::before {
+  background: var(--doc-danger);
+}
+.ne-requisito[data-estado="NO_APLICA"]::before {
+  background: var(--doc-border);
+}
+
+/* Con prórroga, el ámbar manda sobre el estado: es la información con plazo. */
+.ne-requisito[data-prorroga="vigente"]::before,
+.ne-requisito[data-prorroga="por_vencer"]::before {
+  background: var(--doc-prorroga, var(--doc-warning));
+}
+.ne-requisito[data-prorroga="vencida"]::before {
+  background: var(--doc-danger);
+}
+.ne-requisito[data-prorroga="por_vencer"],
+.ne-requisito[data-prorroga="vencida"] {
+  border-color: color-mix(in srgb, var(--doc-danger) 40%, var(--doc-border));
+}
+
+.ne-requisito-cabecera {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.ne-requisito-texto {
+  min-width: 0;
+  flex: 1 1 16rem;
+}
+
+.ne-requisito-nombre {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--doc-text);
+  text-wrap: pretty;
+}
+
+.ne-requisito-orden {
+  display: inline-block;
+  margin-right: 0.45rem;
+  color: var(--doc-text-faint);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+.ne-requisito-detalle {
+  margin: 0.15rem 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--doc-text-faint);
+}
+
+.ne-requisito-acciones {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.ne-requisito-cuerpo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  overflow: hidden;
+}
+
+.ne-prorroga {
+  display: grid;
+  gap: 0.6rem;
+  padding: 0.65rem;
+  border: 1px dashed color-mix(in srgb, var(--doc-prorroga, var(--doc-warning)) 55%, var(--doc-border));
+  border-radius: 0.6rem;
+  background: color-mix(in srgb, var(--doc-prorroga, var(--doc-warning)) 8%, transparent);
+}
+
+@media (min-width: 640px) {
+  .ne-prorroga {
+    grid-template-columns: minmax(0, 18rem) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+.ne-prorroga-sello {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 650;
+  background: var(--doc-warning-bg);
+  color: var(--doc-warning-fg);
+}
+
+.ne-prorroga-sello[data-situacion="vencida"] {
+  background: var(--doc-danger-bg);
+  color: var(--doc-danger-fg);
+}
+
+.ne-enlace {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--doc-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  transition: color var(--ne-rapida) ease;
+}
+
+.ne-enlace:hover {
+  color: var(--doc-accent);
+}
+
+.ne-enlace[data-lleno="si"] {
+  color: var(--doc-info-fg, var(--doc-accent));
+}
+
+.ne-enlace-flecha {
+  transition: transform var(--ne-normal) var(--ne-salida);
+}
+
+.ne-enlace-flecha[data-abierto="si"] {
+  transform: rotate(180deg);
+}
+
+/* ------------------------------------------------------------------ */
+/* Calendario                                                          */
+/* ------------------------------------------------------------------ */
+
+.ne-fecha-fila {
+  display: flex;
+  gap: 0.35rem;
+  align-items: stretch;
+}
+
+.ne-fecha-texto {
+  flex: 1 1 auto;
+}
+
+.ne-fecha-boton {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 2.25rem;
+  border: 1px solid var(--doc-border);
+  border-radius: 0.6rem;
+  background: var(--doc-surface-2);
+  color: var(--doc-text-muted);
+  transition:
+    color var(--ne-rapida) ease,
+    border-color var(--ne-rapida) ease,
+    transform var(--ne-rapida) var(--ne-quint);
+}
+
+.ne-fecha-boton:hover {
+  color: var(--doc-accent);
+  border-color: var(--doc-accent);
+}
+
+.ne-fecha-boton:active {
+  transform: scale(0.95);
+}
+
+.ne-calendario {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 0.4rem);
+  left: 0;
+  width: min(19rem, calc(100vw - 2rem));
+  padding: 0.7rem;
+  border: 1px solid var(--doc-border);
+  border-radius: 0.85rem;
+  background: var(--doc-surface-flotante, var(--doc-surface-1));
+  box-shadow: 0 22px 48px -24px rgba(0, 0, 0, 0.55);
+  transform-origin: top left;
+  /* El vidrio del calendario es más denso que el del panel: encima de una tabla
+     con números, un cristal transparente hace ilegibles los dos. */
+  backdrop-filter: blur(18px) saturate(140%);
+}
+
+.ne-calendario-cabecera {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.ne-calendario-cabecera p {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 650;
+  color: var(--doc-text);
+  text-transform: capitalize;
+}
+
+.ne-calendario-anio {
+  color: var(--doc-text-faint);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+.ne-calendario-nav {
+  display: grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 1px solid var(--doc-border);
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--doc-text-muted);
+  transition: color var(--ne-rapida) ease, border-color var(--ne-rapida) ease;
+}
+
+.ne-calendario-nav:hover {
+  color: var(--doc-accent);
+  border-color: var(--doc-accent);
+}
+
+.ne-calendario-dias,
+.ne-calendario-rejilla {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 2px;
+}
+
+.ne-calendario-dias span {
+  padding: 0.2rem 0;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--doc-text-faint);
+}
+
+.ne-calendario-hueco {
+  height: 2rem;
+}
+
+.ne-calendario-dia {
+  height: 2rem;
+  border: 1px solid transparent;
+  border-radius: 0.45rem;
+  background: transparent;
+  color: var(--doc-text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  transition:
+    background-color var(--ne-rapida) ease,
+    color var(--ne-rapida) ease,
+    transform var(--ne-rapida) var(--ne-quint);
+}
+
+.ne-calendario-dia:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--doc-accent) 16%, transparent);
+  color: var(--doc-text);
+  transform: scale(1.06);
+}
+
+.ne-calendario-dia:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.ne-calendario-dia[data-hoy="si"] {
+  border-color: var(--doc-border);
+  font-weight: 700;
+  color: var(--doc-text);
+}
+
+.ne-calendario-dia[data-elegida="si"] {
+  background: var(--doc-accent);
+  border-color: transparent;
+  color: #fff;
+  font-weight: 700;
+}
+
+.ne-calendario-pie {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--doc-border);
+}
+
+.ne-calendario-atajo {
+  padding: 0.22rem 0.6rem;
+  border: 1px solid var(--doc-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--doc-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  transition: color var(--ne-rapida) ease, border-color var(--ne-rapida) ease;
+}
+
+.ne-calendario-atajo:hover {
+  color: var(--doc-accent);
+  border-color: var(--doc-accent);
+}
+
+/* ------------------------------------------------------------------ */
+/* Pie de acciones y resumen                                           */
+/* ------------------------------------------------------------------ */
+
+.ne-pie {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.7rem 0 0.2rem;
+  background: linear-gradient(to top, var(--doc-surface-1) 55%, transparent);
+}
+
+.ne-resumen {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  font-size: 11px;
+  color: var(--doc-text-muted);
+}
+
+.ne-resumen b {
+  color: var(--doc-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.ne-barra {
+  position: relative;
+  height: 0.3rem;
+  border-radius: 999px;
+  background: var(--doc-surface-2);
+  overflow: hidden;
+}
+
+.ne-barra span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--doc-accent), var(--doc-success));
+  transition: width var(--ne-lenta) var(--ne-salida);
+}
+
+/* ------------------------------------------------------------------ */
+/* Revelado del texto, por línea                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Se anima la LÍNEA, no el carácter.
+ *
+ * Animar cada letra de veintisiete nombres de documento son cientos de nodos
+ * animados a la vez para un efecto que casi nadie mira dos veces, y en un equipo
+ * de oficina eso se nota en el primer fotograma. Por línea son cuatro nodos y el
+ * efecto se percibe igual.
+ */
+.ne-revelar {
+  animation: ne-revelar var(--ne-lenta) var(--ne-salida) both;
+}
+
+.ne-revelar-2 {
+  animation-delay: 60ms;
+}
+.ne-revelar-3 {
+  animation-delay: 120ms;
+}
+
+@keyframes ne-revelar {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Preferencias y papel                                                */
+/* ------------------------------------------------------------------ */
+
+@media (prefers-reduced-motion: reduce) {
+  .ne-form *,
+  .ne-calendario * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* El interruptor de la propia aplicación. Mirar solo la preferencia del sistema
+   deja el ajuste de Configuración sin efecto, que era el caso. */
+.reduce-motion .ne-form *,
+.reduce-motion .ne-calendario * {
+  animation: none !important;
+  transition: none !important;
+}
+
+@media print {
+  .ne-form {
+    --ne-rapida: 0ms;
+    --ne-normal: 0ms;
+    --ne-lenta: 0ms;
+  }
+
+  .ne-pasos,
+  .ne-pie,
+  .ne-requisito-acciones {
+    display: none !important;
+  }
+
+  /* El vidrio se aplana: en papel una sombra es una mancha gris. */
+  .ne-requisito,
+  .ne-categoria,
+  .ne-calendario {
+    background: #fff !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    border-color: #999 !important;
+  }
+
+  /* El chip pasa a borde sólido con su etiqueta: sin color, el estado tiene que
+     seguir leéndose. */
+  .ne-chip {
+    border-color: #333 !important;
+    color: #000 !important;
+    background: #fff !important;
+  }
+
+  .ne-chip:not([data-activo="si"]) {
+    display: none !important;
+  }
+}
