@@ -1,7 +1,7 @@
 /**
  * Cliente central del backend de Documentación.
  *
- * ── Por qué UN cliente ──────────────────────────────────────────────────────
+ * ── Por qué UN cliente ──────────────────────────────────────────────────
  * En la versión anterior cada panel llamaba a `google.script.run` (o a `fetch`)
  * por su cuenta. Consecuencia: cada uno inventaba su propio manejo de errores, su
  * propio indicador de carga y su propio criterio de reintento, y ninguno se
@@ -23,14 +23,20 @@
  *   · **errores normalizados**: siempre `codigo`, `mensaje`, `pista` y `campos`,
  *     que es lo que un formulario necesita para marcar el campo que falla.
  *
- * ── Transporte ──────────────────────────────────────────────────────────────
+ * ── Transporte ────────────────────────────────────────────────────────
  * `POST` con el cuerpo como `text/plain` y `redirect: "follow"`. No es descuido:
  * con `application/json` el navegador manda un `OPTIONS` previo que Apps Script no
  * responde y la llamada muere por CORS; y Apps Script contesta con un 302 hacia
  * googleusercontent, así que la redirección hay que seguirla.
+ *
+ * ── La URL es la de Documentación, no la del dashboard ─────────────────────
+ * Este módulo habla con SU proyecto de Apps Script (`apps-script/documentacion/`),
+ * que no es el del resto de la aplicación. Ver `SCRIPT_URL_DOCUMENTACION` en
+ * `constants.ts`: apuntar aquí a `SCRIPT_URL` hacía que el módulo se declarara
+ * conectado y mandara sus acciones al backend equivocado.
  */
 
-import { SCRIPT_URL } from "../../../constants";
+import { CLAVE_URL_DOCUMENTACION, SCRIPT_URL_DOCUMENTACION } from "../../../constants";
 
 /* ------------------------------------------------------------------ */
 /* Tipos del sobre                                                     */
@@ -109,6 +115,17 @@ const TIMEOUT_POR_DEFECTO = 30000;
 const TIMEOUT_LARGO = 180000;
 const REINTENTOS = 3;
 
+/**
+ * Forma de un despliegue de aplicación web publicado.
+ *
+ * Se exige `/macros/s/<id>/exec`. Los tres errores que se ven de verdad al pegar
+ * la URL a mano son: copiar la del editor (`/edit`), copiar la de prueba (`/dev`,
+ * que exige sesión de Google y no sirve para el equipo) y copiar la del libro de
+ * cálculo en lugar de la del script. Los tres se rechazan aquí, sin gastar una
+ * petición y diciendo cuál es el problema.
+ */
+const FORMA_EXEC = /^https:\/\/script\.google\.com\/(a\/[^/]+\/)?macros\/s\/[A-Za-z0-9_-]+\/exec(\?.*)?$/;
+
 /** Acciones que escriben: llevan identificador y no se ejecutan dos veces. */
 const ESCRITURAS = new Set([
   "documentacion.instalar",
@@ -181,10 +198,51 @@ export function accionesDeclaradas(): string[] {
 }
 
 /* ------------------------------------------------------------------ */
+/* Persistencia de la URL                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Lectura y escritura tolerantes del almacén del navegador.
+ *
+ * `window.localStorage` lanza al ACCEDER a la propiedad cuando el navegador tiene
+ * bloqueados los datos del sitio (política corporativa, cookies bloqueadas,
+ * almacenamiento particionado en un iframe). Ya costó una pantalla en blanco una
+ * vez; aquí nunca puede costar la conexión del módulo.
+ */
+function leerGuardada(): string {
+  try {
+    if (typeof window === "undefined") return "";
+    return String(window.localStorage.getItem(CLAVE_URL_DOCUMENTACION) ?? "").trim();
+  } catch {
+    return "";
+  }
+}
+
+function guardarUrl(url: string): void {
+  try {
+    if (typeof window === "undefined") return;
+    if (url) window.localStorage.setItem(CLAVE_URL_DOCUMENTACION, url);
+    else window.localStorage.removeItem(CLAVE_URL_DOCUMENTACION);
+  } catch {
+    /* sin almacén, la URL vale para esta sesión y se vuelve a pedir */
+  }
+}
+
+/**
+ * URL inicial, en orden de autoridad.
+ *
+ * El entorno gana sobre el navegador: si el área publica un despliegue nuevo y lo
+ * pone en Vercel, esa es la buena, y no la que alguien pegó a mano hace un mes.
+ */
+function urlInicial(): string {
+  return SCRIPT_URL_DOCUMENTACION || leerGuardada();
+}
+
+/* ------------------------------------------------------------------ */
 /* Estado del cliente                                                  */
 /* ------------------------------------------------------------------ */
 
-let urlActiva = SCRIPT_URL;
+let urlActiva = urlInicial();
 let actorActivo = "";
 let rolActivo = "";
 let contadorSecuencia = 0;
@@ -193,7 +251,14 @@ let contadorSecuencia = 0;
 const enVuelo = new Map<string, Promise<unknown>>();
 
 export function configurarCliente(opciones: { url?: string; actor?: string; rol?: string }): void {
-  if (opciones.url !== undefined) urlActiva = (opciones.url || "").trim() || SCRIPT_URL;
+  if (opciones.url !== undefined) {
+    const limpia = (opciones.url || "").trim();
+    // Vacío NO significa «vuelve al valor por defecto»: significa «quita la URL».
+    // Confundir las dos cosas es exactamente lo que hacía que el módulo acabara
+    // hablando con el Apps Script del dashboard.
+    urlActiva = limpia || SCRIPT_URL_DOCUMENTACION || "";
+    if (limpia) guardarUrl(limpia);
+  }
   if (opciones.actor !== undefined) actorActivo = opciones.actor;
   if (opciones.rol !== undefined) rolActivo = opciones.rol;
 }
@@ -202,8 +267,35 @@ export function urlCliente(): string {
   return urlActiva;
 }
 
+/** ¿La URL tiene la forma de un despliegue publicado? */
+export function urlBienFormada(url: string): boolean {
+  return FORMA_EXEC.test(String(url || "").trim());
+}
+
+/**
+ * Por qué una URL no sirve, en lenguaje llano y vacío si sí sirve.
+ *
+ * Se usa en Configuración para validar mientras se escribe, sin gastar una
+ * petición para descubrir algo que se ve a simple vista.
+ */
+export function problemaDeUrl(url: string): string {
+  const texto = String(url || "").trim();
+  if (!texto) return "Falta la URL de la aplicación web de Documentación.";
+  if (!/^https:\/\//.test(texto)) return "La URL tiene que empezar por https://";
+  if (/docs\.google\.com/.test(texto)) {
+    return "Esa es la URL del libro de cálculo, no la del script. En el editor de Apps Script: Implementar › Gestionar implementaciones › copiar la URL de la aplicación web.";
+  }
+  if (!/^https:\/\/script\.google\.com\//.test(texto)) return "La URL tiene que ser de script.google.com";
+  if (/\/dev(\?|$)/.test(texto)) {
+    return "Esa es la URL de prueba (/dev): solo funciona para quien edita el script. Hace falta la de la implementación, que termina en /exec.";
+  }
+  if (/\/edit(\?|#|$)/.test(texto)) return "Esa es la URL del editor. Hace falta la de la implementación, que termina en /exec.";
+  if (!FORMA_EXEC.test(texto)) return "La URL tiene que terminar en /exec y venir de Implementar › Gestionar implementaciones.";
+  return "";
+}
+
 export function hayBackendConfigurado(): boolean {
-  return /^https:\/\/script\.google\.com\//.test(urlActiva);
+  return urlBienFormada(urlActiva);
 }
 
 export function nuevoRequestId(): string {
@@ -223,6 +315,72 @@ export function secuenciaActual(): number {
 
 function esperar(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/* ------------------------------------------------------------------ */
+/* Interpretación de una respuesta que no es un sobre                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Convierte una respuesta inesperada en un error que dice qué pasó.
+ *
+ * Los cuatro casos reales, en orden de frecuencia:
+ *
+ *   1. **el backend equivocado**. La respuesta es el payload del dashboard de
+ *      talento (`candidatos`, `competencias`, `arquetipos_disc`). Es JSON válido,
+ *      así que un cliente que solo comprueba «parsea» lo acepta y luego se queja
+ *      de que falta `ok`. Con el nombre del culpable, se arregla en diez segundos;
+ *   2. **permisos caducados**. Apps Script no devuelve 401: devuelve 200 con la
+ *      página HTML de autorización de Google;
+ *   3. **implementación privada**. Devuelve la pantalla de inicio de sesión;
+ *   4. **JSON sin sobre**. Algún otro script contestando en esa URL.
+ */
+function errorDeRespuestaInesperada(texto: string, crudo: unknown): DocError {
+  const muestra = texto.slice(0, 400);
+
+  if (crudo && typeof crudo === "object" && !Array.isArray(crudo)) {
+    const objeto = crudo as Record<string, unknown>;
+    const esDashboard = "candidatos" in objeto || "arquetipos_disc" in objeto || "competencias" in objeto;
+    if (esDashboard) {
+      return new DocError("Esa URL es la del Apps Script del dashboard de talento, no la de Documentación.", {
+        codigo: "BACKEND_EQUIVOCADO",
+        pista:
+          "Documentación tiene su propio proyecto de Apps Script, el de apps-script/documentacion/. Abre ESE proyecto, Implementar › Gestionar implementaciones, copia su URL /exec y pégala en Configuración › Conexión.",
+        detalle: { camposRecibidos: Object.keys(objeto).slice(0, 8) },
+      });
+    }
+    return new DocError("El backend respondió un JSON que no es el sobre de Documentación.", {
+      codigo: "SIN_SOBRE",
+      pista:
+        "Se esperaba { ok, accion, datos, meta }. Comprueba que la URL sea la del proyecto de Documentación y que su implementación esté al día: al cambiar el código hay que publicar una VERSIÓN NUEVA, guardar no basta.",
+      detalle: { camposRecibidos: Object.keys(objeto).slice(0, 8) },
+    });
+  }
+
+  const pareceLogin = /accounts\.google\.com|iniciar sesión|sign in/i.test(texto);
+  const pareceAutorizacion = /autoriza|authorization|permiso|permission|necesita tu permiso/i.test(texto);
+  if (pareceLogin) {
+    return new DocError("El backend pide iniciar sesión en Google.", {
+      codigo: "AUTENTICACION",
+      pista:
+        'Vuelve a implementar la aplicación web con «Ejecutar como: yo» y «Quién tiene acceso: cualquier usuario». Con «solo yo», el equipo recibe esta pantalla.',
+      detalle: { respuesta: muestra },
+    });
+  }
+  if (pareceAutorizacion) {
+    return new DocError("Al despliegue le faltan permisos sobre el libro.", {
+      codigo: "PERMISOS_BACKEND",
+      pista:
+        "Abre el proyecto de Apps Script, ejecuta cualquier función a mano una vez y acepta los permisos. Después publica una versión nueva de la implementación.",
+      detalle: { respuesta: muestra },
+    });
+  }
+
+  return new DocError("El backend respondió algo que no es JSON.", {
+    codigo: "RESPUESTA_INVALIDA",
+    pista: "Comprueba que la URL termine en /exec y que la implementación esté publicada.",
+    detalle: { respuesta: muestra },
+  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -264,29 +422,29 @@ async function unaVez<T>(
     });
 
     const texto = await respuesta.text();
-    let sobre: DocSobre<T> | null = null;
+    let crudo: unknown = null;
     try {
-      sobre = JSON.parse(texto) as DocSobre<T>;
+      crudo = JSON.parse(texto) as unknown;
     } catch {
-      sobre = null;
+      crudo = null;
     }
 
-    if (!sobre) {
-      // Casi siempre es la pantalla de inicio de sesión de Google: la
-      // implementación no está publicada para «cualquier usuario».
-      const pareceLogin = /accounts\.google\.com|iniciar sesión|sign in/i.test(texto);
-      throw new DocError(
-        pareceLogin ? "El backend pide iniciar sesión en Google." : "El backend respondió algo que no es JSON.",
-        {
-          codigo: pareceLogin ? "AUTENTICACION" : "RESPUESTA_INVALIDA",
-          pista: pareceLogin
-            ? 'Vuelve a implementar la aplicación web con acceso "Cualquier usuario".'
-            : "Comprueba que la URL termine en /exec y que la implementación esté publicada.",
-          detalle: { respuesta: texto.slice(0, 400) },
-        },
-      );
+    // Un sobre de verdad trae `ok` booleano y `accion`. Cualquier otra cosa —aunque
+    // sea JSON impecable— viene de otro sitio, y decirlo es la mitad del arreglo.
+    const esSobre =
+      !!crudo && typeof crudo === "object" && !Array.isArray(crudo) && typeof (crudo as { ok?: unknown }).ok === "boolean";
+
+    if (!esSobre) throw errorDeRespuestaInesperada(texto, crudo);
+
+    if (!respuesta.ok) {
+      // Con sobre y sin 2xx: se cree al sobre, que es más específico, pero se deja
+      // constancia del código HTTP en el detalle.
+      const sobre = crudo as DocSobre<T>;
+      sobre.meta = { ...(sobre.meta ?? {}), traza: `http ${respuesta.status}` };
+      return sobre;
     }
-    return sobre;
+
+    return crudo as DocSobre<T>;
   } finally {
     clearTimeout(temporizador);
     if (signalExterno) signalExterno.removeEventListener("abort", cancelar);
@@ -305,10 +463,15 @@ export async function llamar<T = unknown>(
   opciones: OpcionesLlamada = {},
 ): Promise<T> {
   if (!hayBackendConfigurado()) {
-    throw new DocError("No hay un backend configurado para Documentación.", {
-      codigo: "SIN_BACKEND",
-      pista: "Pega la URL de la aplicación web en Configuración › Conexión.",
-    });
+    const problema = problemaDeUrl(urlActiva);
+    throw new DocError(
+      urlActiva ? "La URL del backend de Documentación no es válida." : "No hay un backend configurado para Documentación.",
+      {
+        codigo: "SIN_BACKEND",
+        pista: problema || "Pega la URL de la aplicación web en Configuración › Conexión.",
+        detalle: { url: urlActiva },
+      },
+    );
   }
 
   const escritura = esEscritura(accion);
@@ -411,6 +574,109 @@ export async function consultarVigente<T>(
   return datos;
 }
 
+/* ------------------------------------------------------------------ */
+/* Diagnóstico                                                         */
+/* ------------------------------------------------------------------ */
+
+export interface ComprobacionConexion {
+  codigo: "url" | "endpoint" | "sobre" | "instalado";
+  titulo: string;
+  ok: boolean;
+  detalle: string;
+  remedio: string;
+}
+
+export interface InformeConexion {
+  ok: boolean;
+  url: string;
+  comprobaciones: ComprobacionConexion[];
+  texto: string;
+}
+
+/**
+ * Cuatro comprobaciones que apuntan a cuatro culpables distintos.
+ *
+ * Solo LEE: nunca escribe una fila de prueba en el libro. Es la diferencia entre
+ * un diagnóstico y un efecto secundario.
+ */
+export async function diagnosticarConexion(): Promise<InformeConexion> {
+  const comprobaciones: ComprobacionConexion[] = [];
+  const url = urlActiva;
+
+  const problema = problemaDeUrl(url);
+  comprobaciones.push({
+    codigo: "url",
+    titulo: "La URL tiene forma de implementación publicada",
+    ok: !problema,
+    detalle: problema || `${url.slice(0, 64)}…`,
+    remedio: problema ? "Apps Script › Implementar › Gestionar implementaciones › copiar la URL que termina en /exec." : "",
+  });
+
+  if (problema) {
+    return terminarInforme(url, comprobaciones);
+  }
+
+  let sobre: DocSobre<{ instalado?: boolean; libro?: string }> | null = null;
+  let fallo: DocError | null = null;
+  try {
+    sobre = await unaVez<{ instalado?: boolean; libro?: string }>(
+      "documentacion.estado",
+      { solicitudId: nuevoRequestId(), origen: "diagnostico" },
+      15000,
+    );
+  } catch (e) {
+    fallo = e instanceof DocError ? e : new DocError(String(e), { codigo: "ERROR" });
+  }
+
+  const respondio = !!sobre || (fallo !== null && !fallo.red);
+  comprobaciones.push({
+    codigo: "endpoint",
+    titulo: "El endpoint responde",
+    ok: respondio,
+    detalle: respondio ? "Contestó a documentacion.estado." : (fallo?.message ?? "Sin respuesta."),
+    remedio: respondio ? "" : "Puede ser la red de la oficina o un cortafuegos que bloquea script.google.com.",
+  });
+
+  comprobaciones.push({
+    codigo: "sobre",
+    titulo: "La respuesta es el sobre de Documentación",
+    ok: !!sobre,
+    detalle: sobre ? `accion: ${sobre.accion || "documentacion.estado"}` : (fallo?.pista || fallo?.message || "—"),
+    remedio: sobre ? "" : (fallo?.pista ?? ""),
+  });
+
+  const instalado = sobre?.ok === true && (sobre.data ?? sobre.datos)?.instalado === true;
+  comprobaciones.push({
+    codigo: "instalado",
+    titulo: "El libro tiene el modelo instalado",
+    ok: instalado,
+    detalle: instalado ? `Libro: ${(sobre?.data ?? sobre?.datos)?.libro ?? "sin nombre"}` : "Faltan hojas del modelo normalizado.",
+    remedio: instalado ? "" : "Menú Documentación del libro › Instalar o actualizar modelo.",
+  });
+
+  return terminarInforme(url, comprobaciones);
+}
+
+function terminarInforme(url: string, comprobaciones: ComprobacionConexion[]): InformeConexion {
+  const lineas = [
+    "Diagnóstico de conexión — módulo Documentación",
+    `Fecha: ${new Date().toISOString()}`,
+    `URL: ${url || "(sin configurar)"}`,
+    "",
+  ];
+  for (const c of comprobaciones) {
+    lineas.push(`${c.ok ? "[OK]" : "[FALLA]"} ${c.titulo}`);
+    if (c.detalle) lineas.push(`       ${c.detalle}`);
+    if (!c.ok && c.remedio) lineas.push(`       Remedio: ${c.remedio}`);
+  }
+  return {
+    ok: comprobaciones.every((c) => c.ok),
+    url,
+    comprobaciones,
+    texto: lineas.join("\n"),
+  };
+}
+
 /** Mensaje para la persona, a partir de cualquier cosa que se haya lanzado. */
 export function mensajeDeError(error: unknown): { mensaje: string; pista: string; codigo: string } {
   if (error instanceof DocError) {
@@ -421,10 +687,10 @@ export function mensajeDeError(error: unknown): { mensaje: string; pista: string
 }
 
 /** Limpia el estado interno. Solo lo usan las pruebas. */
-export function __reiniciarClienteParaPruebas(): void {
+export function __reiniciarClienteParaPruebas(url?: string): void {
   enVuelo.clear();
   contadorSecuencia = 0;
-  urlActiva = SCRIPT_URL;
+  urlActiva = url !== undefined ? url : urlInicial();
   actorActivo = "";
   rolActivo = "";
 }
